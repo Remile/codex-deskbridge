@@ -266,6 +266,20 @@ function activityStatus(value) {
   return '';
 }
 
+function eventTime(value) {
+  let date;
+  if ((typeof value === 'number' && Number.isFinite(value)) || (typeof value === 'string' && /^\d+$/.test(value))) {
+    let milliseconds = Number(value);
+    if (milliseconds > 1e17) milliseconds /= 1_000_000;
+    else if (milliseconds > 1e14) milliseconds /= 1_000;
+    else if (milliseconds < 1e11) milliseconds *= 1_000;
+    date = new Date(milliseconds);
+  } else date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '时间未知';
+  return [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map(part => String(part).padStart(2, '0')).join(':');
+}
+
 function activityText(activity) {
   if (!activity || typeof activity !== 'object') return '';
   const status = activityStatus(activity.status);
@@ -281,18 +295,18 @@ function activityText(activity) {
     const name = activity.agentPath || activity.tool || activity.kind;
     detail = name ? `子任务：${markdownLiteral(name, 240)}` : '处理子任务';
   }
-  return detail ? `- ${detail}${status ? `（${status}）` : ''}` : '';
+  return detail ? `- **${eventTime(activity.timestamp)}** · ${detail}${status ? `（${status}）` : ''}` : '';
 }
 
 export function streamingProgressText(messages, activities = []) {
   const texts = Array.isArray(messages) ? messages : [];
-  const phase = texts
-    .map(message => markdownText(typeof message === 'string' ? message : message?.text, 3_800))
-    .filter(Boolean)
-    .at(-1) || '';
+  const phase = texts.map(message => ({
+    content: markdownText(typeof message === 'string' ? message : message?.text, 3_800),
+    time: eventTime(typeof message === 'string' ? undefined : message?.timestamp),
+  })).filter(message => message.content).at(-1);
   const recent = (Array.isArray(activities) ? activities : []).map(activityText).filter(Boolean).slice(-3).join('\n');
   if (!phase && !recent) return '';
-  return `**阶段进展**\n\n${phase || '正在处理，尚无新的阶段说明。'}\n\n---\n\n**最近行为**\n\n${recent || '暂无新的已落盘行为。'}`.slice(0, 12_000);
+  return `**阶段进展 · ${phase?.time || '时间未知'}**\n\n${phase?.content || '正在处理，尚无新的阶段说明。'}\n\n---\n\n**最近行为**\n\n${recent || '暂无新的已落盘行为。'}`.slice(0, 12_000);
 }
 
 export function streamingFinalText(message) {

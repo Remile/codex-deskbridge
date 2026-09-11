@@ -87,11 +87,11 @@ test('completion preserves safe Markdown while escaping Lark tags and unsafe lin
 
 test('streaming progress card exposes state and content targets and keeps only the latest stage', () => {
   const content = streamingProgressText([
-    { text: '第一阶段 [link](https://bad.example)' },
-    { text: '第二阶段\n\n- 保留列表\n- [查看 PR](https://github.com/example/repo/pull/1)\n\n<script>' },
+    { text: '第一阶段 [link](https://bad.example)', timestamp: '2026-09-09T12:00:01' },
+    { text: '第二阶段\n\n- 保留列表\n- [查看 PR](https://github.com/example/repo/pull/1)\n\n<script>', timestamp: '2026-09-09T12:34:56' },
   ], [
-    { type: 'file_change', files: [{ path: 'src/old.mjs' }], status: 'completed' },
-    { type: 'command', command: 'npm test', status: 'running' },
+    { type: 'file_change', files: [{ path: 'src/old.mjs' }], status: 'completed', timestamp: '2026-09-09T12:34:57' },
+    { type: 'command', command: 'npm test', status: 'running', timestamp: '2026-09-09T12:35:02' },
   ]);
   const card = streamingProgressCard({ title: '真实任务标题', content });
   assert.equal(card.schema, '2.0');
@@ -103,7 +103,10 @@ test('streaming progress card exposes state and content targets and keeps only t
   assert.doesNotMatch(content, /第一阶段/);
   assert.match(content, /第二阶段/);
   assert.match(content, /阶段进展/);
+  assert.match(content, /阶段进展 · 12:34:56/);
   assert.match(content, /最近行为/);
+  assert.match(content, /12:34:57.*修改文件/);
+  assert.match(content, /12:35:02.*npm test/);
   assert.match(content, /npm test/);
   assert.match(content, /- 保留列表/);
   assert.match(content, /\[查看 PR\]\(https:\/\/github\.com\/example\/repo\/pull\/1\)/);
