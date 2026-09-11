@@ -1,0 +1,9 @@
+{
+  "profile": "codex-bridge",
+  "allowedUsers": ["ou_demo"],
+  "autoDiscover": true,
+  "pollIntervalMs": 5000,
+  "codex": {
+    "approvalPolicy": "on-request"
+  }
+}

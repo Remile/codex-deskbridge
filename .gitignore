@@ -1,0 +1,12 @@
+.local/
+node_modules/
+work/
+.env
+.env.*
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.tgz
+.DS_Store

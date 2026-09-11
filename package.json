@@ -1,0 +1,45 @@
+{
+  "name": "agent-im-bridge",
+  "version": "0.1.0",
+  "description": "Open framework for connecting IM platforms to local coding-agent runtimes, with Codex and Feishu adapters.",
+  "license": "MIT",
+  "private": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/framework.mjs",
+    "./codex": "./src/app-server.mjs",
+    "./adapters/stdio": "./src/adapters/stdio.mjs",
+    "./adapters/feishu": "./src/lark-transport.mjs"
+  },
+  "bin": {
+    "agent-im-bridge": "src/open-framework.mjs"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "ARCHITECTURE.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "docs/",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "cli": "node src/cli.mjs",
+    "test": "node --test",
+    "bridge": "node src/bridge-service.mjs",
+    "bridge:demo": "node src/bridge-service.mjs --demo",
+    "framework": "node src/open-framework.mjs",
+    "release:check": "node scripts/release-check.mjs",
+    "service:install": "node src/service-cli.mjs install",
+    "service:start": "node src/service-cli.mjs start",
+    "service:stop": "node src/service-cli.mjs stop",
+    "service:restart": "node src/service-cli.mjs restart",
+    "service:status": "node src/service-cli.mjs status",
+    "service:logs": "node src/service-cli.mjs logs",
+    "service:uninstall": "node src/service-cli.mjs uninstall"
+  }
+}
