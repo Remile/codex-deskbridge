@@ -14,6 +14,7 @@ const safeCode = error => /^[A-Z_]+$/.test(error?.code || '') ? error.code : 'LO
 // timeouts and disconnects are ambiguous; keep their fence to prevent replay.
 const definiteSendErrors = new Set(['TASK_RUNNING', 'TASK_NOT_LOADED', 'THREAD_NOT_FOUND', 'INVALID_HISTORY_PATH', 'HISTORY_TOO_LARGE', 'INDEX_UNAVAILABLE', 'INVALID_INPUT', 'SEND_DISABLED', 'SEND_IN_PROGRESS', 'TURN_NOT_RUNNING', 'DESKTOP_REJECTED']);
 const supportedMessageTypes = new Set(['text', 'post', 'image', 'file', 'audio', 'media', 'video']);
+const SUBMISSION_RECOVERY_MS = 60 * 1000;
 const STREAM_REFRESH_MS = 8 * 60 * 1000;
 const STREAM_RECOVERY_COOLDOWN_MS = 60 * 1000;
 const deliveryDetails = error => ({
@@ -153,7 +154,7 @@ export class BridgeStore {
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS deliveries (key TEXT PRIMARY KEY, status TEXT NOT NULL, created INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS submissions (thread TEXT PRIMARY KEY, turn TEXT);
+      CREATE TABLE IF NOT EXISTS submissions (thread TEXT PRIMARY KEY, turn TEXT, created INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS watches (owner TEXT NOT NULL, chat TEXT NOT NULL, thread TEXT NOT NULL, terminal TEXT, PRIMARY KEY(owner,chat,thread));
       CREATE TABLE IF NOT EXISTS topics (owner TEXT NOT NULL, chat TEXT NOT NULL, thread TEXT NOT NULL, root_message TEXT NOT NULL UNIQUE, PRIMARY KEY(owner,chat,thread));
       CREATE TABLE IF NOT EXISTS picker_refs (card_message TEXT NOT NULL, ref TEXT NOT NULL, owner TEXT NOT NULL, chat TEXT NOT NULL, thread TEXT NOT NULL, expires INTEGER NOT NULL, PRIMARY KEY(card_message,ref));
@@ -174,6 +175,8 @@ export class BridgeStore {
     const pickerColumns = this.db.prepare('PRAGMA table_info(picker_refs)').all();
     if (!pickerColumns.some(column => column.name === 'kind')) this.db.exec("ALTER TABLE picker_refs ADD COLUMN kind TEXT NOT NULL DEFAULT 'thread'");
     if (!pickerColumns.some(column => column.name === 'project')) this.db.exec('ALTER TABLE picker_refs ADD COLUMN project TEXT');
+    const submissionColumns = this.db.prepare('PRAGMA table_info(submissions)').all();
+    if (!submissionColumns.some(column => column.name === 'created')) this.db.exec('ALTER TABLE submissions ADD COLUMN created INTEGER NOT NULL DEFAULT 0');
   }
   claim(key) { return this.db.prepare('INSERT OR IGNORE INTO deliveries VALUES (?, ?, ?)').run(key, 'claimed', Date.now()).changes > 0; }
   finish(key, status) { this.db.prepare('UPDATE deliveries SET status=? WHERE key=?').run(status, key); }
@@ -182,7 +185,7 @@ export class BridgeStore {
   unwatch(owner, chat, thread) { this.db.prepare('DELETE FROM watches WHERE owner=? AND chat=? AND thread=?').run(owner, chat, thread); }
   advance(watch, terminal) { this.db.prepare('UPDATE watches SET terminal=? WHERE owner=? AND chat=? AND thread=?').run(terminal, watch.owner, watch.chat, watch.thread); }
   submission(thread) { return this.db.prepare('SELECT * FROM submissions WHERE thread=?').get(thread); }
-  reserve(thread) { return this.db.prepare('INSERT OR IGNORE INTO submissions VALUES (?,NULL)').run(thread).changes > 0; }
+  reserve(thread, created = Date.now()) { return this.db.prepare('INSERT OR IGNORE INTO submissions (thread,turn,created) VALUES (?,NULL,?)').run(thread, created).changes > 0; }
   accepted(thread, turn) { this.db.prepare('UPDATE submissions SET turn=? WHERE thread=?').run(turn, thread); }
   release(thread) { this.db.prepare('DELETE FROM submissions WHERE thread=?').run(thread); }
   topic(owner, chat, thread) { return this.db.prepare('SELECT * FROM topics WHERE owner=? AND chat=? AND thread=?').get(owner, chat, thread); }
@@ -837,10 +840,14 @@ export class Bridge {
     const previous = this.store.submission(thread);
     if (previous) {
       const history = await this.desktop.readThread({ threadId: thread, limit: 1, terminalTurnId: previous.turn });
-      if (previous.turn && (history.requestedTerminal?.turnId === previous.turn || history.lastTerminal?.turnId === previous.turn)) this.store.release(thread);
+      const completed = previous.turn
+        && (history.requestedTerminal?.turnId === previous.turn || history.lastTerminal?.turnId === previous.turn);
+      const staleReservation = !previous.turn && history.observedStatus !== 'running'
+        && (previous.created <= 0 || this.now() - previous.created >= SUBMISSION_RECOVERY_MS);
+      if (completed || staleReservation) this.store.release(thread);
       else throw Object.assign(new Error(), { code: 'SEND_IN_PROGRESS', thread });
     }
-    if (!this.store.reserve(thread)) throw Object.assign(new Error(), { code: 'SEND_IN_PROGRESS', thread });
+    if (!this.store.reserve(thread, this.now())) throw Object.assign(new Error(), { code: 'SEND_IN_PROGRESS', thread });
     try {
       const result = await this.desktop.sendMessage({ threadId: thread, text, ...(images.length ? { images } : {}) }, { requestKey });
       this.store.accepted(thread, result.turnId);

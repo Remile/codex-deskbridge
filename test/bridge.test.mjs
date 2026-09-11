@@ -636,6 +636,30 @@ test('uncertain text reply and ambiguous Desktop submission are never blindly re
   assert.match(f.replies.at(-1).text, /SEND_IN_PROGRESS/);
 });
 
+test('an old pre-accept submission fence recovers only after the task is idle', async t => {
+  const f = await fixture(t);
+  f.store.reserve('task-secret-id', 0);
+  await f.bridge.handle(message('/codex send task-secret-id 新请求', { message_id: 'om_stale_fence' }));
+  assert.equal(f.submissions.length, 1);
+  assert.equal(f.submissions[0].payload.text, '新请求');
+  assert.equal(f.store.submission('task-secret-id').turn, 'accepted-turn');
+
+  f.store.release('task-secret-id');
+  f.store.reserve('task-secret-id', 0);
+  f.history.observedStatus = 'running';
+  await f.bridge.handle(message('/codex send task-secret-id 运行时请求', { message_id: 'om_running_fence' }));
+  assert.equal(f.submissions.length, 1);
+  assert.match(f.replies.at(-1).text, /SEND_IN_PROGRESS/);
+});
+
+test('a fresh pre-accept submission fence keeps its recovery grace period', async t => {
+  const f = await fixture(t);
+  f.store.reserve('task-secret-id', 999_999);
+  await f.bridge.handle(message('/codex send task-secret-id 不应立即重试', { message_id: 'om_fresh_fence' }));
+  assert.equal(f.submissions.length, 0);
+  assert.match(f.replies.at(-1).text, /SEND_IN_PROGRESS/);
+});
+
 test('a failed Feishu acknowledgement never turns an accepted card submission into a failure message', async t => {
   const f = await fixture(t);
   await selectTask(f);
