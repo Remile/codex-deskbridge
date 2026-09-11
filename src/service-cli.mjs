@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 
-export const LABEL = 'io.github.agent-im-bridge.service';
+export const LABEL = 'io.github.codex-deskbridge.service';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const local = join(root, '.local');
 const plist = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);

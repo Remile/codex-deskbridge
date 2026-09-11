@@ -1,4 +1,4 @@
-# Architecture
+# Codex DeskBridge architecture
 
 ## Boundaries
 
@@ -34,4 +34,3 @@ Optional `images` and `files` are absolute local paths prepared by the IM adapte
 ## Extension direction
 
 New runtimes implement the same four task methods and emit `event`. New IM integrations implement `start`, `publish`, and `stop`. Rich IM capabilities can be optional adapter capabilities without making them mandatory for text-only products.
-

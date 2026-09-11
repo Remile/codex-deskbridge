@@ -8,7 +8,7 @@ This review covers the repository contents, not ignored deployment data.
 - Real Feishu state, task mappings, logs, media, and local database files remain under ignored `.local/` and `work/` directories.
 - The runtime uses the documented Codex App Server protocol. Private ChatGPT Desktop IPC calls and direct Codex state database/history readers were removed.
 - The npm package has an explicit file allowlist and a pre-release content scan.
-- The project uses a neutral package and service name and includes a non-affiliation trademark notice.
+- The public package and service names are consistent with the Codex DeskBridge brand, and the README includes a non-affiliation trademark notice.
 - No third-party source code is vendored. `lark-cli` and `codex` are external executables supplied by the deployer.
 
 ## Maintainer confirmation required before public release
@@ -20,4 +20,3 @@ This review covers the repository contents, not ignored deployment data.
 - Decide where private vulnerability reports should be sent and update `SECURITY.md` with that concrete channel.
 
 This is an engineering release assessment, not a legal opinion.
-

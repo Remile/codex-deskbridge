@@ -33,7 +33,7 @@ test('creates a durable task with initialize then thread/start over App Server J
   assert.deepEqual(spawned.args, ['app-server', '--stdio']);
   assert.equal(writes[0].method, 'initialize');
   assert.equal(writes[1].method, 'initialized');
-  assert.deepEqual(writes[2], { method: 'thread/start', id: 2, params: { cwd: '/repo', serviceName: 'agent_im_bridge' } });
+  assert.deepEqual(writes[2], { method: 'thread/start', id: 2, params: { cwd: '/repo', serviceName: 'codex_deskbridge' } });
 });
 
 test('matches responses by id while forwarding interleaved notifications', async t => {

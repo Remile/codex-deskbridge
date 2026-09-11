@@ -28,5 +28,4 @@ npm run service:restart
 npm run service:uninstall
 ```
 
-The LaunchAgent label is `io.github.agent-im-bridge.service`. Installation is per macOS user because both Codex state and Feishu credentials belong to that user session.
-
+The LaunchAgent label is `io.github.codex-deskbridge.service`. Installation is per macOS user because both Codex state and Feishu credentials belong to that user session.

@@ -29,7 +29,7 @@ export class AppServerClient extends EventEmitter {
     this.args = args;
     this.spawn = spawn;
     this.timeoutMs = timeoutMs;
-    this.clientInfo = clientInfo || { name: 'agent_im_bridge', title: 'Agent IM Bridge', version: '0.1.0' };
+    this.clientInfo = clientInfo || { name: 'codex_deskbridge', title: 'Codex DeskBridge', version: '0.1.0' };
     this.onServerRequest = onServerRequest;
     this.pending = new Map();
     this.requestId = 0;
@@ -253,9 +253,9 @@ export class CodexAppServerRuntime extends EventEmitter {
       const snapshot = await this.readThread({ threadId, limit: 1 });
       if (snapshot.observedStatus === 'running') throw failure('Task is running.', 'TASK_RUNNING', 409);
       await this.client.request('thread/resume', { threadId, excludeTurns: true, ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}) });
-      const clientUserMessageId = uuidFor(`agent-im-bridge:${threadId}:${requestKey || Date.now()}`);
+      const clientUserMessageId = uuidFor(`codex-deskbridge:${threadId}:${requestKey || Date.now()}`);
       const result = await this.client.request('turn/start', { threadId, clientUserMessageId, input: inputFor({ text, images, files }),
-        turnTrigger: 'agent-im-bridge', ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}) });
+        turnTrigger: 'codex-deskbridge', ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}) });
       const turn = result?.turn;
       if (!turn?.id || !['inProgress', 'completed', 'interrupted', 'failed'].includes(turn.status)) throw failure('Codex returned an unrecognized turn.', 'UNKNOWN_SEND_OUTCOME');
       if (turn.status === 'failed' || turn.status === 'interrupted') throw failure(`Codex turn is ${turn.status}.`, 'TURN_NOT_RUNNING', 409);
@@ -269,12 +269,12 @@ export class CodexAppServerRuntime extends EventEmitter {
     let project;
     try { project = await realpath(cwd); if (!(await stat(project)).isDirectory()) throw new Error(); }
     catch { throw failure('Project directory is unavailable.', 'PROJECT_NOT_FOUND', 404); }
-    const started = await this.client.request('thread/start', { cwd: project, serviceName: 'agent_im_bridge', ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}) });
+    const started = await this.client.request('thread/start', { cwd: project, serviceName: 'codex_deskbridge', ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}) });
     const threadId = started?.thread?.id;
     if (!threadId) throw failure('Codex omitted the new task id.', 'APP_SERVER_INVALID_RESPONSE');
-    const clientUserMessageId = uuidFor(`agent-im-bridge:${threadId}:${requestKey || Date.now()}`);
+    const clientUserMessageId = uuidFor(`codex-deskbridge:${threadId}:${requestKey || Date.now()}`);
     const result = await this.client.request('turn/start', { threadId, clientUserMessageId, input: inputFor({ text, images, files }),
-      turnTrigger: 'agent-im-bridge', ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}) });
+      turnTrigger: 'codex-deskbridge', ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}) });
     const turn = result?.turn;
     if (!turn?.id || !['inProgress', 'completed'].includes(turn.status)) throw failure('Codex did not accept the first turn.', 'UNKNOWN_SEND_OUTCOME');
     return { threadId, clientUserMessageId, source: 'codex-app-server', turnId: turn.id, status: turn.status };
@@ -285,7 +285,7 @@ export class AppServerThreadCreator {
   constructor(options = {}) { this.client = options.client || new AppServerClient(options); }
   async createThread({ cwd, ephemeral = false }) {
     try {
-      const result = await this.client.request('thread/start', { cwd, serviceName: 'agent_im_bridge', ...(ephemeral ? { ephemeral: true } : {}) });
+      const result = await this.client.request('thread/start', { cwd, serviceName: 'codex_deskbridge', ...(ephemeral ? { ephemeral: true } : {}) });
       if (!result?.thread?.id) throw failure('Codex omitted the new task id.', 'APP_SERVER_INVALID_RESPONSE');
       return { threadId: result.thread.id };
     } finally { await this.client.stop(); }

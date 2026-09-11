@@ -1,8 +1,10 @@
-# Agent IM Bridge
+# Codex DeskBridge
 
-Agent IM Bridge is a local, dependency-free Node.js framework for connecting an instant-messaging product to a local coding agent. The first runtime adapter uses the official Codex App Server protocol. A Feishu adapter is included as the first full-featured IM implementation.
+Codex DeskBridge is a local, dependency-free Node.js framework that brings the Codex task workflow to an instant-messaging product. It is designed as a companion for people who use Codex Desktop and Codex CLI, and uses the official Codex App Server protocol as its portable runtime boundary. A Feishu adapter is included as the first full-featured IM implementation.
 
-The framework does not read ChatGPT Desktop databases, call private Desktop IPC methods, copy login tokens, or require a public callback server. Codex owns task persistence and execution; the bridge translates IM events, attachments, progress, results, and approval requests.
+> Connect Codex Desktop and CLI to the IM you already use.
+
+The portable release does not attach to a running Codex Desktop process, read ChatGPT Desktop databases, call private Desktop IPC methods, copy login tokens, or require a public callback server. Codex owns task persistence and execution; the bridge translates IM events, attachments, progress, results, and approval requests.
 
 ## Architecture
 
@@ -75,8 +77,8 @@ export class MyImAdapter {
 Wire it to Codex:
 
 ```js
-import { AgentBridgeFramework } from 'agent-im-bridge';
-import { CodexAppServerRuntime } from 'agent-im-bridge/codex';
+import { AgentBridgeFramework } from 'codex-deskbridge';
+import { CodexAppServerRuntime } from 'codex-deskbridge/codex';
 
 const bridge = new AgentBridgeFramework({
   runtime: new CodexAppServerRuntime(),

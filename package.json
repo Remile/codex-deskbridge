@@ -1,7 +1,7 @@
 {
-  "name": "agent-im-bridge",
+  "name": "codex-deskbridge",
   "version": "0.1.0",
-  "description": "Open framework for connecting IM platforms to local coding-agent runtimes, with Codex and Feishu adapters.",
+  "description": "Open bridge connecting Codex Desktop and Codex CLI tasks to Feishu and other IM platforms.",
   "license": "MIT",
   "private": false,
   "type": "module",
@@ -12,7 +12,7 @@
     "./adapters/feishu": "./src/lark-transport.mjs"
   },
   "bin": {
-    "agent-im-bridge": "src/open-framework.mjs"
+    "codex-deskbridge": "src/open-framework.mjs"
   },
   "files": [
     "src/",
