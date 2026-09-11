@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes } from 'node:crypto';
-import { basename, dirname, isAbsolute } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { completionCard, pickerCard, projectPickerCard, streamingFinalText, streamingProgressCard, streamingProgressText, taskTopicCard } from './cards.mjs';
 
 const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value);
@@ -65,30 +65,34 @@ function outputImagePaths(text) {
   return paths;
 }
 
-function projectPath(value) {
-  return typeof value === 'string' && value.startsWith('/') && value.length <= 4096 && !/[\u0000-\u001f\u007f]/.test(value) ? value : '';
-}
+const PROJECTLESS = 'projectless';
 
-function projectLabel(path) {
-  if (path.includes('/.codex/.chatgpt-projects/')) return 'ChatGPT 项目';
-  return basename(path) || '未命名项目';
+function threadProjectKey(thread) {
+  const projectId = typeof thread?.projectId === 'string' ? thread.projectId.trim() : '';
+  return projectId ? `project:${projectId}` : PROJECTLESS;
 }
 
 function groupedProjects(threads) {
-  const groups = new Map();
+  const groups = new Map([[PROJECTLESS, {
+    key: PROJECTLESS, title: '无项目', count: 0, projectId: null, cwd: null,
+  }]]);
   for (const thread of threads) {
-    const path = projectPath(thread?.cwd);
-    if (!path) continue;
-    const existing = groups.get(path);
-    if (existing) existing.count++;
-    else groups.set(path, { path, title: projectLabel(path), count: 1 });
+    const key = threadProjectKey(thread);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.count++;
+      if (!existing.cwd && typeof thread.projectRoot === 'string') existing.cwd = thread.projectRoot;
+      continue;
+    }
+    const projectId = thread.projectId.trim();
+    const title = typeof thread.projectName === 'string' && thread.projectName.trim()
+      ? thread.projectName.trim() : `Codex 项目 ${projectId.slice(0, 8)}`;
+    groups.set(key, {
+      key, title, count: 1, projectId,
+      cwd: typeof thread.projectRoot === 'string' && thread.projectRoot ? thread.projectRoot : null,
+    });
   }
-  const duplicateNames = new Map();
-  for (const project of groups.values()) duplicateNames.set(project.title, (duplicateNames.get(project.title) || 0) + 1);
-  return [...groups.values()].map(project => ({
-    ...project,
-    title: duplicateNames.get(project.title) > 1 ? `${basename(dirname(project.path))}/${project.title}` : project.title,
-  }));
+  return [...groups.values()];
 }
 
 function messageResources(messageType, content) {
@@ -386,21 +390,19 @@ export class Bridge {
     const expires = this.now() + 30 * 60 * 1000;
     const projects = groupedProjects(threads).slice(0, 12).map(project => ({ ...project, ref: randomBytes(12).toString('base64url') }));
     this.store.purgePickers(this.now());
-    if (!projects.length) {
-      await this.transport.send({ chatId: event.chat_id, text: '暂无可用的本机 Codex 项目。', key: keyOf(`picker:${event.message_id}`) });
-      return;
-    }
     const result = await this.transport.sendCard({ chatId: event.chat_id, card: projectPickerCard({ projects }), key: keyOf(`picker:${event.message_id}`) });
     const root = resultMessageId(result);
-    for (const project of projects) this.store.saveProject(root, project.ref, event.sender_id, event.chat_id, project.path, expires);
+    for (const project of projects) this.store.saveProject(root, project.ref, event.sender_id, event.chat_id, project.key, expires);
   }
 
-  async showTaskPicker(event, project, deliveryKey, error = '') {
+  async showTaskPicker(event, projectKey, deliveryKey, error = '') {
     const { threads } = await this.desktop.listThreads({ limit: 200 });
-    const recent = threads.filter(task => id(task.id) && task.cwd === project).slice(0, 11);
+    const project = groupedProjects(threads).find(candidate => candidate.key === projectKey);
+    if (!project) throw Object.assign(new Error('Codex project is no longer available'), { code: 'PROJECT_NOT_FOUND' });
+    const recent = threads.filter(task => id(task.id) && threadProjectKey(task) === projectKey).slice(0, 11);
     const snapshots = await Promise.allSettled(recent.map(task => this.desktop.readThread({ threadId: task.id, limit: 1 })));
     const tasks = [{
-      ref: randomBytes(12).toString('base64url'), title: '＋ 创建新任务', status: '请填写下方任务描述', thread: '', kind: 'new', project,
+      ref: randomBytes(12).toString('base64url'), title: '＋ 创建新任务', status: '请填写下方任务描述', thread: '', kind: 'new', project: projectKey,
     }, ...recent.map((task, index) => {
       const snapshot = snapshots[index].status === 'fulfilled' ? snapshots[index].value : null;
       const submitted = snapshot?.messages?.filter(message => message.role === 'user').at(-1)?.text || '';
@@ -411,17 +413,17 @@ export class Bridge {
         updatedAt: typeof task.updatedAt === 'string' ? task.updatedAt : '',
         thread: task.id,
         kind: 'thread',
-        project,
+        project: projectKey,
       };
     })];
     const visible = await this.showSourceCardResult(event, deliveryKey, {
-      card: pickerCard({ tasks, projectTitle: projectLabel(project), error }),
-      fallback: error || `已选择项目 ${projectLabel(project)}，请重新发送 /codex 继续选择任务。`,
+      card: pickerCard({ tasks, projectTitle: project.title, error }),
+      fallback: error || `已选择项目 ${project.title}，请重新发送 /codex 继续选择任务。`,
     });
     if (!visible) return false;
     const expires = this.now() + 30 * 60 * 1000;
     for (const task of tasks) this.store.savePicker(
-      event.message_id, task.ref, event.operator_id, event.chat_id, task.thread, expires, task.kind, project,
+      event.message_id, task.ref, event.operator_id, event.chat_id, task.thread, expires, task.kind, projectKey,
     );
     return true;
   }
@@ -928,16 +930,23 @@ export class Bridge {
     this.store.finish(deliveryKey, delivered ? 'sent' : 'uncertain');
   }
 
-  async createFromCard(project, text, event, deliveryKey) {
+  async createFromCard(projectKey, text, event, deliveryKey) {
     let result;
     try {
-      result = await this.desktop.createTask({ cwd: project, text }, { requestKey: `feishu-card:${event.event_id}` });
+      const { threads } = await this.desktop.listThreads({ limit: 200 });
+      const project = groupedProjects(threads).find(candidate => candidate.key === projectKey);
+      if (!project) throw Object.assign(new Error('Codex project is no longer available'), { code: 'PROJECT_NOT_FOUND' });
+      result = await this.desktop.createTask({
+        text,
+        ...(project.projectId ? { projectId: project.projectId } : {}),
+        ...(project.cwd ? { cwd: project.cwd } : {}),
+      }, { requestKey: `feishu-card:${event.event_id}` });
     } catch (error) {
       const code = safeCode(error);
       const delivered = await this.showSourceCardResult(event, deliveryKey, {
         card: taskTopicCard({
           title: taskTitle('', text), status: '创建失败', submitted: text,
-          note: `Codex 未能创建并启动任务（${code}）。请检查 Codex 登录状态与项目目录。`,
+          note: `Codex 未能创建并启动任务（${code}）。请检查 Codex 登录状态或所选项目。`,
         }),
         fallback: `Codex 未能创建并启动任务（${code}）。`,
       });

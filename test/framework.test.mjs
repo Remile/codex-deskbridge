@@ -5,7 +5,9 @@ import { AgentBridgeFramework, validateAdapterEvent } from '../src/framework.mjs
 
 test('validates the portable adapter event contract', () => {
   assert.equal(validateAdapterEvent({ type: 'task.list' }).type, 'task.list');
+  assert.deepEqual(validateAdapterEvent({ type: 'task.create', text: 'projectless' }), { type: 'task.create', text: 'projectless' });
   assert.throws(() => validateAdapterEvent({ type: 'task.send', text: 'x' }), { code: 'INVALID_ADAPTER_EVENT' });
+  assert.throws(() => validateAdapterEvent({ type: 'task.create', text: 'x', projectId: 42 }), { code: 'INVALID_ADAPTER_EVENT' });
 });
 
 test('routes normalized IM commands to the runtime and publishes results', async t => {
@@ -26,4 +28,3 @@ test('routes normalized IM commands to the runtime and publishes results', async
   runtime.emit('event', { method: 'turn/completed' });
   assert.deepEqual(published[1], { type: 'runtime.event', event: { method: 'turn/completed' } });
 });
-

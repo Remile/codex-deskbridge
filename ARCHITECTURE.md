@@ -18,7 +18,7 @@ The bundled Feishu service contains richer state for topic roots, CardKit update
 | `task.list` | none | recent local tasks |
 | `task.read` | `taskId` | task metadata, turns, visible messages and activities |
 | `task.send` | `taskId`, `text` | accepted Codex turn |
-| `task.create` | `cwd`, `text` | new durable task and accepted first turn |
+| `task.create` | `text`; optional `projectId`, `cwd` | new durable projectless or project-bound task and accepted first turn |
 
 Optional `images` and `files` are absolute local paths prepared by the IM adapter. The runtime sends images as `localImage` inputs. Other files are described to Codex as local attachments so the agent can inspect them with its configured tools.
 

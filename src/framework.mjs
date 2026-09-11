@@ -10,7 +10,9 @@ export function validateAdapterEvent(event) {
   if (event.requestId !== undefined && typeof event.requestId !== 'string') throw invalid('requestId must be a string.');
   if (['task.read', 'task.send'].includes(event.type) && (typeof event.taskId !== 'string' || !event.taskId)) throw invalid('taskId is required.');
   if (event.type === 'task.send' && typeof event.text !== 'string') throw invalid('text is required.');
-  if (event.type === 'task.create' && (typeof event.cwd !== 'string' || typeof event.text !== 'string')) throw invalid('cwd and text are required.');
+  if (event.type === 'task.create' && typeof event.text !== 'string') throw invalid('text is required.');
+  if (event.type === 'task.create' && event.cwd !== undefined && typeof event.cwd !== 'string') throw invalid('cwd must be a string.');
+  if (event.type === 'task.create' && event.projectId !== undefined && typeof event.projectId !== 'string') throw invalid('projectId must be a string.');
   return event;
 }
 
@@ -54,7 +56,7 @@ export class AgentBridgeFramework extends EventEmitter {
       if (event.type === 'task.list') data = await this.runtime.listThreads({ limit: event.limit });
       if (event.type === 'task.read') data = await this.runtime.readThread({ threadId: event.taskId, limit: event.limit });
       if (event.type === 'task.send') data = await this.runtime.sendMessage({ threadId: event.taskId, text: event.text, images: event.images || [], files: event.files || [] }, { requestKey: event.requestId });
-      if (event.type === 'task.create') data = await this.runtime.createTask({ cwd: event.cwd, text: event.text, images: event.images || [], files: event.files || [] }, { requestKey: event.requestId });
+      if (event.type === 'task.create') data = await this.runtime.createTask({ cwd: event.cwd, projectId: event.projectId, text: event.text, images: event.images || [], files: event.files || [] }, { requestKey: event.requestId });
       const response = { type: 'command.result', requestId: event.requestId, command: event.type, ok: true, data };
       await this.adapter.publish(response);
       this.emit('result', response);
@@ -68,4 +70,3 @@ export class AgentBridgeFramework extends EventEmitter {
     }
   }
 }
-

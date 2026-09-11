@@ -36,6 +36,42 @@ test('creates a durable task with initialize then thread/start over App Server J
   assert.deepEqual(writes[2], { method: 'thread/start', id: 2, params: { cwd: '/repo', serviceName: 'codex_deskbridge' } });
 });
 
+test('creates a durable projectless task without inventing a cwd or project id', async () => {
+  const requests = [];
+  const client = {
+    request: async (method, params) => {
+      requests.push({ method, params });
+      return { thread: { id: '01a0-projectless' } };
+    },
+    stop: async () => {},
+  };
+  const creator = new AppServerThreadCreator({ client });
+  assert.deepEqual(await creator.createThread({}), { threadId: '01a0-projectless' });
+  assert.deepEqual(requests, [{ method: 'thread/start', params: { serviceName: 'codex_deskbridge' } }]);
+});
+
+test('runtime exposes persisted project names and roots alongside tasks', async () => {
+  const client = new EventEmitter();
+  client.start = async () => {};
+  client.stop = async () => {};
+  client.request = async method => {
+    if (method === 'thread/list') return { data: [
+      { id: 'projectless', name: 'Loose task', cwd: '/tmp/generated', projectId: null },
+      { id: 'bound', name: 'Bound task', cwd: '/repo/subdir', projectId: 'project-1' },
+    ] };
+    if (method === 'project/list') return { data: [{ id: 'project-1', name: 'Real project', roots: [{ path: '/repo' }] }] };
+    throw new Error(method);
+  };
+  const runtime = new CodexAppServerRuntime({ client });
+  const result = await runtime.listThreads({ limit: 20 });
+  assert.equal(result.threads[0].projectId, null);
+  assert.deepEqual({
+    projectId: result.threads[1].projectId,
+    projectName: result.threads[1].projectName,
+    projectRoot: result.threads[1].projectRoot,
+  }, { projectId: 'project-1', projectName: 'Real project', projectRoot: '/repo' });
+});
+
 test('matches responses by id while forwarding interleaved notifications', async t => {
   const events = [];
   const client = new AppServerClient({ binary: '/codex', spawn() {

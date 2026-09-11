@@ -238,13 +238,49 @@ test('new-task selection requires text then creates and owns the source card top
     form_value: JSON.stringify({ task_picker: refreshedCreateRef, prompt: '实现新的搜索接口' }),
   }));
   assert.deepEqual(f.creations, [{
-    payload: { cwd: '/repo/demo', text: '实现新的搜索接口' },
+    payload: { text: '实现新的搜索接口' },
     options: { requestKey: 'feishu-card:event_create_task' },
   }]);
   assert.equal(f.store.topic('ou_owner', 'oc_chat', 'new-task-id').root_message, picker.root);
   assert.equal(f.store.watches().some(watch => watch.thread === 'new-task-id'), true);
   assert.equal(f.replies.length, 0);
   assert.match(JSON.stringify(f.updates.at(-1).card), /实现新的搜索接口/);
+});
+
+test('project picker groups arbitrary working directories under one projectless entry', async t => {
+  const f = await fixture(t);
+  f.desktop.listThreads = async () => ({ threads: [
+    { id: 'task-secret-id', title: '下载发票', cwd: '/Users/me/Documents/Codex/2026-09-11/random-a' },
+    { id: 'another-task', title: '优化模型', cwd: '/private/tmp/random-b' },
+    { id: 'project-task', title: '项目任务', cwd: '/repo/project', projectId: 'project-1', projectName: '真实项目', projectRoot: '/repo/project' },
+  ] });
+  await f.bridge.handle(message('/codex'));
+  const cardText = JSON.stringify(f.cards.at(-1).card);
+  assert.match(cardText, /无项目 · 2 个任务/);
+  assert.match(cardText, /真实项目 · 1 个任务/);
+  assert.doesNotMatch(cardText, /random-a|random-b/);
+});
+
+test('new task in a real project uses the persisted project identity and root', async t => {
+  const f = await fixture(t);
+  f.desktop.listThreads = async () => ({ threads: [{
+    id: 'project-task', title: '项目任务', cwd: '/repo/project/subdir', projectId: 'project-1', projectName: '真实项目', projectRoot: '/repo/project',
+  }] });
+  await f.bridge.handle(message('/codex'));
+  const root = f.cards.at(-1).message_id || 'om_card_1';
+  const projectForm = f.cards.at(-1).card.body.elements.find(element => element.tag === 'form');
+  const options = projectForm.elements.find(element => element.tag === 'select_static').options;
+  const realProjectRef = options[1].value;
+  await f.bridge.handle(action({ event_id: 'event_real_project', message_id: root, action_name: 'project_picker', option: realProjectRef }));
+  const taskForm = f.updates.at(-1).card.body.elements.find(element => element.tag === 'form');
+  const createRef = taskForm.elements.find(element => element.tag === 'select_static').options[0].value;
+  await f.bridge.handle(action({
+    event_id: 'event_real_project_create', message_id: root, option: '',
+    form_value: JSON.stringify({ task_picker: createRef, prompt: '项目内新任务' }),
+  }));
+  assert.deepEqual(f.creations.at(-1).payload, {
+    text: '项目内新任务', projectId: 'project-1', cwd: '/repo/project',
+  });
 });
 
 test('empty-input attachment immediately restores the latest progress, behavior and result', async t => {

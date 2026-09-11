@@ -216,10 +216,16 @@ export class CodexAppServerRuntime extends EventEmitter {
   }
 
   async listThreads({ limit = 20 } = {}) {
-    const result = await this.client.request('thread/list', { limit, sortKey: 'updated_at', sortDirection: 'desc' });
+    const [result, projectResult] = await Promise.all([
+      this.client.request('thread/list', { limit, sortKey: 'updated_at', sortDirection: 'desc' }),
+      this.client.request('project/list', { limit: 100 }).catch(() => ({ data: [] })),
+    ]);
+    const projects = new Map((projectResult?.data || []).map(project => [project.id, project]));
     return { source: 'codex-app-server', scope: 'local-codex-tasks', threads: (result?.data || []).map(thread => ({
       id: thread.id, title: thread.name || thread.preview || 'Codex task', cwd: thread.cwd,
-      updated_at: thread.updatedAt, archived: false, model: thread.model, projectId: thread.projectId, status: thread.status,
+      updated_at: thread.updatedAt, archived: false, model: thread.model, projectId: thread.projectId ?? null, status: thread.status,
+      projectName: projects.get(thread.projectId)?.name,
+      projectRoot: projects.get(thread.projectId)?.roots?.[0]?.path,
     })) };
   }
 
@@ -236,7 +242,7 @@ export class CodexAppServerRuntime extends EventEmitter {
     const terminal = turn => turn ? { turnId: turn.id, status: turn.status, timestamp: timestampFor(turn) } : null;
     const current = allTurns.at(-1);
     return {
-      source: 'codex-app-server', thread: { id: thread.id, title: thread.name || thread.preview || 'Codex task', cwd: thread.cwd },
+      source: 'codex-app-server', thread: { id: thread.id, title: thread.name || thread.preview || 'Codex task', cwd: thread.cwd, projectId: thread.projectId ?? null },
       observedStatus: current?.status === 'inProgress' ? 'running' : 'idle', statusNote: 'Snapshot returned by the official Codex App Server.',
       snapshotAt: new Date().toISOString(), turnId: current?.id || null, lastTerminal: terminal(terminalTurns.at(-1)),
       requestedTerminal: terminal(terminalTurnId ? terminalTurns.find(turn => turn.id === terminalTurnId) : null),
@@ -263,13 +269,19 @@ export class CodexAppServerRuntime extends EventEmitter {
     } finally { this.pendingTasks.delete(threadId); }
   }
 
-  async createTask({ cwd, text, images = [], files = [] }, { requestKey } = {}) {
+  async createTask({ cwd, projectId, text, images = [], files = [] }, { requestKey } = {}) {
     validateInput({ text, images, files });
-    if (typeof cwd !== 'string' || !isAbsolute(cwd)) throw failure('Project path is invalid.', 'INVALID_INPUT', 400);
+    if (cwd !== undefined && (typeof cwd !== 'string' || !isAbsolute(cwd))) throw failure('Project path is invalid.', 'INVALID_INPUT', 400);
+    if (projectId !== undefined && (typeof projectId !== 'string' || !projectId.trim() || projectId.length > 100)) throw failure('Project id is invalid.', 'INVALID_INPUT', 400);
     let project;
-    try { project = await realpath(cwd); if (!(await stat(project)).isDirectory()) throw new Error(); }
-    catch { throw failure('Project directory is unavailable.', 'PROJECT_NOT_FOUND', 404); }
-    const started = await this.client.request('thread/start', { cwd: project, serviceName: 'codex_deskbridge', ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}) });
+    if (cwd !== undefined) {
+      try { project = await realpath(cwd); if (!(await stat(project)).isDirectory()) throw new Error(); }
+      catch { throw failure('Project directory is unavailable.', 'PROJECT_NOT_FOUND', 404); }
+    }
+    const started = await this.client.request('thread/start', {
+      ...(project ? { cwd: project } : {}), ...(projectId ? { projectId } : {}), serviceName: 'codex_deskbridge',
+      ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}),
+    });
     const threadId = started?.thread?.id;
     if (!threadId) throw failure('Codex omitted the new task id.', 'APP_SERVER_INVALID_RESPONSE');
     const clientUserMessageId = uuidFor(`codex-deskbridge:${threadId}:${requestKey || Date.now()}`);
@@ -283,9 +295,11 @@ export class CodexAppServerRuntime extends EventEmitter {
 
 export class AppServerThreadCreator {
   constructor(options = {}) { this.client = options.client || new AppServerClient(options); }
-  async createThread({ cwd, ephemeral = false }) {
+  async createThread({ cwd, projectId, ephemeral = false }) {
     try {
-      const result = await this.client.request('thread/start', { cwd, serviceName: 'codex_deskbridge', ...(ephemeral ? { ephemeral: true } : {}) });
+      const result = await this.client.request('thread/start', {
+        ...(cwd ? { cwd } : {}), ...(projectId ? { projectId } : {}), serviceName: 'codex_deskbridge', ...(ephemeral ? { ephemeral: true } : {}),
+      });
       if (!result?.thread?.id) throw failure('Codex omitted the new task id.', 'APP_SERVER_INVALID_RESPONSE');
       return { threadId: result.thread.id };
     } finally { await this.client.stop(); }
