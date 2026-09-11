@@ -4,7 +4,9 @@ The bundled Feishu service is the first rich IM implementation. It uses `lark-cl
 
 ## Configuration
 
-Copy `bridge.example.json` to `.local/bridge.json` and set your `lark-cli` profile plus permitted Feishu users. `codex.binary` is optional when `codex` is on `PATH`. Valid approval policies are `untrusted`, `on-request`, and `never`. A policy that can request approval still needs an authenticated `onServerRequest` handler; the built-in default declines requests.
+Complete the [Feishu authentication and bot setup guide](feishu-setup.md) ([中文](feishu-setup.zh-CN.md)) first. It explains how to create the `codex-deskbridge` bot profile, grant the required scopes and events, and obtain the user `open_id` used by the allowlist.
+
+Copy `bridge.example.json` to `.local/bridge.json` and set the permitted Feishu users. The App ID and App Secret stay in the `lark-cli` profile and must not be copied into this file. `codex.binary` is optional when `codex` is on `PATH`. Valid approval policies are `untrusted`, `on-request`, and `never`. A policy that can request approval still needs an authenticated `onServerRequest` handler; the built-in default declines requests.
 
 ## Capabilities
 

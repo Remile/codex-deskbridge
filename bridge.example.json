@@ -1,6 +1,6 @@
 {
-  "profile": "codex-bridge",
-  "allowedUsers": ["ou_demo"],
+  "profile": "codex-deskbridge",
+  "allowedUsers": ["YOUR_FEISHU_OPEN_ID"],
   "autoDiscover": true,
   "pollIntervalMs": 5000,
   "codex": {

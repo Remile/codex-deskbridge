@@ -92,11 +92,23 @@ Use the incoming IM message ID as `requestId`. The Codex adapter turns it into a
 
 ## Feishu implementation
 
-Copy `bridge.example.json` to `.local/bridge.json`, fill in your local `lark-cli` profile and permitted Feishu users, then run:
+Install the official `lark-cli`:
 
 ```bash
+npx @larksuite/cli@latest install
+```
+
+Then follow the complete [Feishu authentication and bot setup guide](docs/feishu-setup.md) ([中文](docs/feishu-setup.zh-CN.md)). It covers app creation, the exact scopes and events, the bot profile, and how to obtain your `open_id`.
+
+After authentication is ready, copy the example configuration and start the bridge:
+
+```bash
+mkdir -p .local
+cp bridge.example.json .local/bridge.json
 npm run bridge
 ```
+
+The App ID and App Secret are stored by `lark-cli`; they do not belong in `.local/bridge.json`. The bridge configuration contains only the profile name and an explicit user allowlist.
 
 Install it as a per-user macOS service:
 
