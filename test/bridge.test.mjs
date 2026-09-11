@@ -155,6 +155,35 @@ test('a plain text reply inside a known task topic continues that Desktop task',
   assert.match(JSON.stringify(f.replacements.at(-1).card), /运行中/);
 });
 
+test('a rich-text post reply without attachments is submitted as text', async t => {
+  const f = await fixture(t);
+  await selectTask(f);
+  const content = JSON.stringify({ title: '', content: [
+    [{ tag: 'text', text: '确保符合如下规则：' }],
+    [{ tag: 'text', text: '1. 新项目放在 GitHub。' }],
+    [{ tag: 'text', text: '2. 从 Gerrit 同步模型改动。' }],
+  ] });
+  await f.bridge.handle(message(content, {
+    message_id: 'om_rich_text', message_type: 'post', root_id: 'om_card_1',
+  }));
+  assert.deepEqual(f.submissions.at(-1).payload, {
+    threadId: 'task-secret-id',
+    text: '确保符合如下规则：\n1. 新项目放在 GitHub。\n2. 从 Gerrit 同步模型改动。',
+  });
+  assert.equal(f.downloads.length, 0);
+  assert.deepEqual(f.reactions, [{ messageId: 'om_rich_text', emojiType: 'OnIt' }]);
+});
+
+test('a pre-rendered rich-text post reply is submitted as text', async t => {
+  const f = await fixture(t);
+  await selectTask(f);
+  await f.bridge.handle(message('1. 新项目放在 GitHub。\n2. 从 Gerrit 同步模型改动。', {
+    message_id: 'om_rendered_post', message_type: 'post', root_id: 'om_card_1',
+  }));
+  assert.equal(f.submissions.at(-1).payload.text, '1. 新项目放在 GitHub。\n2. 从 Gerrit 同步模型改动。');
+  assert.equal(f.downloads.length, 0);
+});
+
 test('picker displays prompt input and submits task selection plus text in one form', async t => {
   const f = await fixture(t);
   const picker = await openPicker(f);

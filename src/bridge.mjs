@@ -101,15 +101,47 @@ function messageResources(messageType, content) {
   for (const match of content.matchAll(/<(?:file|audio|video|media)\b[^>]*\bkey="(file_[A-Za-z0-9_-]{1,240})"[^>]*\/?\s*>/g)) add(match[1], 'file');
   try {
     const parsed = JSON.parse(content);
-    add(parsed?.image_key, 'image');
-    add(parsed?.file_key, 'file');
+    const visit = value => {
+      if (Array.isArray(value)) return value.forEach(visit);
+      if (!value || typeof value !== 'object') return;
+      add(value.image_key, 'image');
+      add(value.file_key, 'file');
+      Object.values(value).forEach(visit);
+    };
+    visit(parsed);
   } catch { /* processed events normally contain human-readable markers */ }
   return resources.slice(0, 4);
 }
 
+function richTextCaption(value) {
+  if (!value || typeof value !== 'object') return '';
+  if (!Array.isArray(value) && (typeof value.title === 'string' || Array.isArray(value.content))) {
+    const title = typeof value.title === 'string' ? value.title.trim() : '';
+    const inline = node => {
+      if (typeof node === 'string') return node;
+      if (Array.isArray(node)) return node.map(inline).join('');
+      if (!node || typeof node !== 'object') return '';
+      if (typeof node.text === 'string') return node.text;
+      if (node.tag === 'at' && typeof node.user_name === 'string') return `@${node.user_name}`;
+      return '';
+    };
+    const body = Array.isArray(value.content)
+      ? value.content.map(paragraph => inline(paragraph).trim()).filter(Boolean).join('\n')
+      : '';
+    return [title, body].filter(Boolean).join('\n');
+  }
+  for (const child of Object.values(value)) {
+    const caption = richTextCaption(child);
+    if (caption) return caption;
+  }
+  return '';
+}
+
 function messageCaption(messageType, content) {
   if (messageType === 'text') return content.trim();
-  if (/^\s*\{[\s\S]*\}\s*$/.test(content)) return '';
+  if (/^\s*[\[{][\s\S]*[\]}]\s*$/.test(content)) {
+    try { return richTextCaption(JSON.parse(content)); } catch { return ''; }
+  }
   return content
     .replace(/!\[[^\]]*\]\(img_[A-Za-z0-9_-]{1,240}\)/g, '')
     .replace(/<(?:file|audio|video|media)\b[^>]*\bkey="file_[A-Za-z0-9_-]{1,240}"[^>]*\/?\s*>/g, '')
@@ -275,7 +307,11 @@ export class Bridge {
   async messageInput(event) {
     if (event.message_type === 'text') return { text: event.content.trim(), images: [], summary: event.content.trim() };
     const resources = messageResources(event.message_type, event.content);
-    if (!resources.length) throw Object.assign(new Error('No supported resource in message'), { code: 'UNSUPPORTED_MEDIA' });
+    const caption = messageCaption(event.message_type, event.content);
+    if (!resources.length) {
+      if (event.message_type === 'post' && caption) return { text: caption, images: [], summary: caption };
+      throw Object.assign(new Error('No supported resource in message'), { code: 'UNSUPPORTED_MEDIA' });
+    }
     let downloaded;
     try {
       downloaded = await Promise.all(resources.map(resource => this.transport.downloadResource({
@@ -291,7 +327,6 @@ export class Bridge {
       if (resources[index].type === 'image') images.push(resource.path);
       else files.push(resource.path);
     });
-    const caption = messageCaption(event.message_type, event.content);
     const attachmentSummary = [images.length ? `图片 ${images.length} 张` : '', files.length ? `文件 ${files.length} 个` : ''].filter(Boolean).join('，');
     const summary = [caption, attachmentSummary ? `附件：${attachmentSummary}` : ''].filter(Boolean).join('\n');
     const filePrompt = files.length ? `\n\n已下载的飞书附件路径：\n${files.map(path => `- ${path}`).join('\n')}` : '';
