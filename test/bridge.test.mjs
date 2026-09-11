@@ -242,6 +242,7 @@ test('new-task selection requires text then creates and owns the source card top
     options: { requestKey: 'feishu-card:event_create_task' },
   }]);
   assert.equal(f.store.topic('ou_owner', 'oc_chat', 'new-task-id').root_message, picker.root);
+  assert.equal(f.store.projectlessThreads().has('new-task-id'), true);
   assert.equal(f.store.watches().some(watch => watch.thread === 'new-task-id'), true);
   assert.equal(f.replies.length, 0);
   assert.match(JSON.stringify(f.updates.at(-1).card), /实现新的搜索接口/);

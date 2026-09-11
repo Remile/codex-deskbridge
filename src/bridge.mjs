@@ -67,17 +67,18 @@ function outputImagePaths(text) {
 
 const PROJECTLESS = 'projectless';
 
-function threadProjectKey(thread) {
+function threadProjectKey(thread, forcedProjectless = new Set()) {
+  if (forcedProjectless.has(thread?.id) && thread?.projectIdSource !== 'explicit') return PROJECTLESS;
   const projectId = typeof thread?.projectId === 'string' ? thread.projectId.trim() : '';
   return projectId ? `project:${projectId}` : PROJECTLESS;
 }
 
-function groupedProjects(threads) {
+function groupedProjects(threads, forcedProjectless = new Set()) {
   const groups = new Map([[PROJECTLESS, {
     key: PROJECTLESS, title: '无项目', count: 0, projectId: null, cwd: null,
   }]]);
   for (const thread of threads) {
-    const key = threadProjectKey(thread);
+    const key = threadProjectKey(thread, forcedProjectless);
     const existing = groups.get(key);
     if (existing) {
       existing.count++;
@@ -165,6 +166,7 @@ export class BridgeStore {
       CREATE TABLE IF NOT EXISTS project_refs (card_message TEXT NOT NULL, ref TEXT NOT NULL, owner TEXT NOT NULL, chat TEXT NOT NULL, project TEXT NOT NULL, expires INTEGER NOT NULL, PRIMARY KEY(card_message,ref));
       CREATE TABLE IF NOT EXISTS bridge_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS discovered_threads (owner TEXT NOT NULL, thread TEXT NOT NULL, seen INTEGER NOT NULL, PRIMARY KEY(owner,thread));
+      CREATE TABLE IF NOT EXISTS projectless_tasks (thread TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS progress_streams (owner TEXT NOT NULL, chat TEXT NOT NULL, thread TEXT NOT NULL, turn TEXT NOT NULL, card_id TEXT NOT NULL, message_id TEXT, sequence INTEGER NOT NULL, content_hash TEXT NOT NULL, status TEXT NOT NULL, refreshed INTEGER NOT NULL DEFAULT 0, generation INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(owner,chat,thread,turn));`);
     const streamColumns = this.db.prepare('PRAGMA table_info(progress_streams)').all();
     if (!streamColumns.some(column => column.name === 'refreshed')) {
@@ -212,6 +214,8 @@ export class BridgeStore {
   initializeDiscovery(owner) { this.db.prepare('INSERT OR REPLACE INTO bridge_meta VALUES (?,?)').run(`discovery:${owner}`, String(Date.now())); }
   discovered(owner, thread) { return this.db.prepare('SELECT 1 FROM discovered_threads WHERE owner=? AND thread=?').get(owner, thread) !== undefined; }
   markDiscovered(owner, thread) { this.db.prepare('INSERT OR IGNORE INTO discovered_threads VALUES (?,?,?)').run(owner, thread, Date.now()); }
+  markProjectless(thread) { this.db.prepare('INSERT OR IGNORE INTO projectless_tasks VALUES (?)').run(thread); }
+  projectlessThreads() { return new Set(this.db.prepare('SELECT thread FROM projectless_tasks').all().map(row => row.thread)); }
   progressStream(owner, chat, thread, turn) { return this.db.prepare('SELECT * FROM progress_streams WHERE owner=? AND chat=? AND thread=? AND turn=?').get(owner, chat, thread, turn); }
   progressStreams(owner, chat, thread) { return this.db.prepare('SELECT * FROM progress_streams WHERE owner=? AND chat=? AND thread=?').all(owner, chat, thread); }
   saveProgressStream(owner, chat, thread, turn, cardId, messageId, contentHash = '', generation = 0, refreshed = Date.now()) {
@@ -387,8 +391,9 @@ export class Bridge {
 
   async sendPicker(event) {
     const { threads } = await this.desktop.listThreads({ limit: 200 });
+    const projectless = this.store.projectlessThreads();
     const expires = this.now() + 30 * 60 * 1000;
-    const projects = groupedProjects(threads).slice(0, 12).map(project => ({ ...project, ref: randomBytes(12).toString('base64url') }));
+    const projects = groupedProjects(threads, projectless).slice(0, 12).map(project => ({ ...project, ref: randomBytes(12).toString('base64url') }));
     this.store.purgePickers(this.now());
     const result = await this.transport.sendCard({ chatId: event.chat_id, card: projectPickerCard({ projects }), key: keyOf(`picker:${event.message_id}`) });
     const root = resultMessageId(result);
@@ -397,9 +402,10 @@ export class Bridge {
 
   async showTaskPicker(event, projectKey, deliveryKey, error = '') {
     const { threads } = await this.desktop.listThreads({ limit: 200 });
-    const project = groupedProjects(threads).find(candidate => candidate.key === projectKey);
+    const projectless = this.store.projectlessThreads();
+    const project = groupedProjects(threads, projectless).find(candidate => candidate.key === projectKey);
     if (!project) throw Object.assign(new Error('Codex project is no longer available'), { code: 'PROJECT_NOT_FOUND' });
-    const recent = threads.filter(task => id(task.id) && threadProjectKey(task) === projectKey).slice(0, 11);
+    const recent = threads.filter(task => id(task.id) && threadProjectKey(task, projectless) === projectKey).slice(0, 11);
     const snapshots = await Promise.allSettled(recent.map(task => this.desktop.readThread({ threadId: task.id, limit: 1 })));
     const tasks = [{
       ref: randomBytes(12).toString('base64url'), title: '＋ 创建新任务', status: '请填写下方任务描述', thread: '', kind: 'new', project: projectKey,
@@ -934,7 +940,7 @@ export class Bridge {
     let result;
     try {
       const { threads } = await this.desktop.listThreads({ limit: 200 });
-      const project = groupedProjects(threads).find(candidate => candidate.key === projectKey);
+      const project = groupedProjects(threads, this.store.projectlessThreads()).find(candidate => candidate.key === projectKey);
       if (!project) throw Object.assign(new Error('Codex project is no longer available'), { code: 'PROJECT_NOT_FOUND' });
       result = await this.desktop.createTask({
         text,
@@ -955,6 +961,7 @@ export class Bridge {
       return;
     }
     this.store.reserve(result.threadId);
+    if (projectKey === PROJECTLESS) this.store.markProjectless(result.threadId);
     this.store.accepted(result.threadId, result.turnId);
     const delivered = await this.showSourceCardResult(event, deliveryKey, {
       card: taskTopicCard({

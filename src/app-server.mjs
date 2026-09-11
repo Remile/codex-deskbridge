@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { createInterface } from 'node:readline';
+import { enrichThreadProjects } from './project-membership.mjs';
 
 const DEFAULT_BINARY = process.env.CODEX_BIN || 'codex';
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -220,13 +221,11 @@ export class CodexAppServerRuntime extends EventEmitter {
       this.client.request('thread/list', { limit, sortKey: 'updated_at', sortDirection: 'desc' }),
       this.client.request('project/list', { limit: 100 }).catch(() => ({ data: [] })),
     ]);
-    const projects = new Map((projectResult?.data || []).map(project => [project.id, project]));
-    return { source: 'codex-app-server', scope: 'local-codex-tasks', threads: (result?.data || []).map(thread => ({
+    const threads = (result?.data || []).map(thread => ({
       id: thread.id, title: thread.name || thread.preview || 'Codex task', cwd: thread.cwd,
       updated_at: thread.updatedAt, archived: false, model: thread.model, projectId: thread.projectId ?? null, status: thread.status,
-      projectName: projects.get(thread.projectId)?.name,
-      projectRoot: projects.get(thread.projectId)?.roots?.[0]?.path,
-    })) };
+    }));
+    return { source: 'codex-app-server', scope: 'local-codex-tasks', threads: enrichThreadProjects(threads, projectResult?.data || []) };
   }
 
   async readThread({ threadId, limit = 10, terminalTurnId } = {}) {

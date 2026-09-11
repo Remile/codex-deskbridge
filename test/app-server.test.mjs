@@ -57,7 +57,7 @@ test('runtime exposes persisted project names and roots alongside tasks', async 
   client.request = async method => {
     if (method === 'thread/list') return { data: [
       { id: 'projectless', name: 'Loose task', cwd: '/tmp/generated', projectId: null },
-      { id: 'bound', name: 'Bound task', cwd: '/repo/subdir', projectId: 'project-1' },
+      { id: 'bound', name: 'Legacy bound task', cwd: '/repo/subdir', projectId: null },
     ] };
     if (method === 'project/list') return { data: [{ id: 'project-1', name: 'Real project', roots: [{ path: '/repo' }] }] };
     throw new Error(method);
