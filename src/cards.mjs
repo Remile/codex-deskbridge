@@ -263,10 +263,11 @@ function activityStatus(value) {
   if (value === 'running' || value === 'inProgress' || value === 'in_progress') return '运行中';
   if (value === 'completed') return '已完成';
   if (value === 'failed') return '失败';
+  if (value === 'interrupted') return '已中断';
   return '';
 }
 
-function eventTime(value) {
+function eventDate(value) {
   let date;
   if ((typeof value === 'number' && Number.isFinite(value)) || (typeof value === 'string' && /^\d+$/.test(value))) {
     let milliseconds = Number(value);
@@ -275,6 +276,11 @@ function eventTime(value) {
     else if (milliseconds < 1e11) milliseconds *= 1_000;
     date = new Date(milliseconds);
   } else date = new Date(value);
+  return date;
+}
+
+function eventTime(value) {
+  const date = eventDate(value);
   if (!Number.isFinite(date.getTime())) return '时间未知';
   return [date.getHours(), date.getMinutes(), date.getSeconds()]
     .map(part => String(part).padStart(2, '0')).join(':');
@@ -304,7 +310,11 @@ export function streamingProgressText(messages, activities = []) {
     content: markdownText(typeof message === 'string' ? message : message?.text, 3_800),
     time: eventTime(typeof message === 'string' ? undefined : message?.timestamp),
   })).filter(message => message.content).at(-1);
-  const recent = (Array.isArray(activities) ? activities : []).map(activityText).filter(Boolean).slice(-3).join('\n');
+  const recent = (Array.isArray(activities) ? activities : [])
+    .map((activity, index) => ({ index, text: activityText(activity), time: eventDate(activity?.timestamp).getTime() }))
+    .filter(entry => entry.text)
+    .sort((left, right) => (Number.isFinite(left.time) ? left.time : 0) - (Number.isFinite(right.time) ? right.time : 0) || left.index - right.index)
+    .slice(-3).map(entry => entry.text).join('\n');
   if (!phase && !recent) return '';
   return `**阶段进展 · ${phase?.time || '时间未知'}**\n\n${phase?.content || '正在处理，尚无新的阶段说明。'}\n\n---\n\n**最近行为**\n\n${recent || '暂无新的已落盘行为。'}`.slice(0, 12_000);
 }

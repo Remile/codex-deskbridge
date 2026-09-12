@@ -5,6 +5,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { createInterface } from 'node:readline';
 import { enrichThreadProjects } from './project-membership.mjs';
+import { subagentStatus } from './activity.mjs';
 
 const DEFAULT_BINARY = process.env.CODEX_BIN || 'codex';
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -188,7 +189,7 @@ export function normalizeAppServerItem(item, turn) {
     case 'commandExecution': return { ...base, type: 'command', command: typeof item.command === 'string' ? item.command : '', status: item.status, ...(Number.isFinite(item.exitCode) ? { exitCode: item.exitCode } : {}) };
     case 'fileChange': return { ...base, type: 'file_change', status: item.status, files: (item.changes || []).map(change => ({ path: change.path, ...(change.kind ? { kind: typeof change.kind === 'string' ? change.kind : change.kind.type } : {}) })) };
     case 'mcpToolCall': return { ...base, type: 'tool', server: item.server, tool: item.tool, status: item.status };
-    case 'subAgentActivity': return { ...base, type: 'subagent', kind: item.kind, agentThreadId: item.agentThreadId, agentPath: item.agentPath };
+    case 'subAgentActivity': return { ...base, type: 'subagent', kind: item.kind, status: subagentStatus(item.kind), agentThreadId: item.agentThreadId, agentPath: item.agentPath };
     case 'collabAgentToolCall': return { ...base, type: 'subagent_tool', tool: item.tool, status: item.status, threadIds: item.receiverThreadIds || [] };
     case 'reasoning': {
       const text = Array.isArray(item.summary) ? item.summary.filter(value => typeof value === 'string').join('\n') : '';

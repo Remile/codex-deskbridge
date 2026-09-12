@@ -15,6 +15,20 @@ function stringValue(value) {
   return typeof value === 'string' ? value : undefined;
 }
 
+export function actionStatus(value, eventStatus) {
+  const status = stringValue(value);
+  // A completed event can retain the item's earlier in-progress field. Keep
+  // explicit failures, but never let that stale field hide the terminal event.
+  if (eventStatus === 'completed' && (!status || ['running', 'inProgress', 'in_progress'].includes(status))) return 'completed';
+  return status || stringValue(eventStatus);
+}
+
+export function subagentStatus(kind) {
+  if (kind === 'completed' || kind === 'interrupted') return kind;
+  if (kind === 'started' || kind === 'interacted') return 'running';
+  return undefined;
+}
+
 function commandText(value) {
   if (typeof value === 'string') return value.slice(0, MAX_COMMAND_LENGTH);
   if (!Array.isArray(value) || value.some(part => typeof part !== 'string')) return '';
@@ -116,7 +130,7 @@ export function normalizeItem(item, options = {}) {
       const normalized = {
         ...base(item, 'command', context),
         command: commandText(item.command),
-        status: stringValue(item.status) || stringValue(context.status),
+        status: actionStatus(item.status, context.status),
       };
       const exitCode = hasOwn(item, 'exitCode') ? item.exitCode : item.exit_code;
       if (typeof exitCode === 'number' && Number.isFinite(exitCode)) normalized.exitCode = exitCode;
@@ -126,7 +140,7 @@ export function normalizeItem(item, options = {}) {
     case 'FileChange':
       return {
         ...base(item, 'file_change', context),
-        status: stringValue(item.status) || stringValue(context.status),
+        status: actionStatus(item.status, context.status),
         files: fileEntries(item.changes),
       };
 
@@ -134,6 +148,7 @@ export function normalizeItem(item, options = {}) {
       return {
         ...base(item, 'subagent', context),
         kind: stringValue(item.kind),
+        status: subagentStatus(item.kind),
         agentThreadId: stringValue(item.agent_thread_id),
         agentPath: stringValue(item.agent_path),
       };
@@ -142,7 +157,7 @@ export function normalizeItem(item, options = {}) {
       return {
         ...base(item, 'subagent_tool', context),
         tool: stringValue(item.tool),
-        status: stringValue(item.status) || stringValue(context.status),
+        status: actionStatus(item.status, context.status),
         threadIds: Array.isArray(item.receiver_thread_ids)
           ? item.receiver_thread_ids.filter(value => typeof value === 'string').slice(0, MAX_THREAD_IDS)
           : [],
@@ -153,7 +168,7 @@ export function normalizeItem(item, options = {}) {
         ...base(item, 'tool', context),
         server: stringValue(item.server),
         tool: stringValue(item.tool),
-        status: stringValue(item.status) || stringValue(context.status),
+        status: actionStatus(item.status, context.status),
       };
 
     case 'Reasoning': {

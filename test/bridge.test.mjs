@@ -464,6 +464,22 @@ test('poll replaces the latest stage and turns the same streaming card into the 
   assert.match(JSON.stringify(finalReplacement.card), /已完成/);
 });
 
+test('poll renders a fast action as completed and refreshes status-only changes', async t => {
+  const f = await fixture(t);
+  await selectTask(f);
+  f.history.observedStatus = 'running';
+  f.history.turnId = 'fast-actions';
+  f.history.activities = [{ id: 'fast', turnId: 'fast-actions', type: 'command', command: 'git status', status: 'completed' }];
+  await f.bridge.poll();
+  assert.match(JSON.stringify(f.streamCards.at(-1).card), /git status（已完成）/);
+  f.history.activities.push({ id: 'next', turnId: 'fast-actions', type: 'command', command: 'npm test', status: 'running' });
+  await f.bridge.poll();
+  f.history.activities[1].status = 'completed';
+  await f.bridge.poll();
+  assert.match(f.streamUpdates.at(-1).content, /npm test（已完成）/);
+  assert.equal(f.streamCards.length, 1);
+});
+
 test('a repeated CardKit failure retries once then degrades the same message to a static card', async t => {
   const f = await fixture(t);
   await selectTask(f);

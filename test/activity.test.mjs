@@ -97,6 +97,7 @@ test('exposes bounded subagent markers and tool metadata only', () => {
   assert.deepEqual(subagent, {
     id: 'subagent-1', type: 'subagent', timestamp: context.timestamp, turnId: context.turnId,
     kind: 'started', agentThreadId: 'child-thread', agentPath: '/workspace/child',
+    status: 'running',
   });
   assert.doesNotMatch(JSON.stringify(subagent), /SECRET_/);
 
@@ -127,6 +128,15 @@ test('exposes bounded subagent markers and tool metadata only', () => {
     server: 'local', tool: 'read_file', status: 'completed',
   });
   assert.doesNotMatch(JSON.stringify(tool), /SECRET_/);
+});
+
+test('terminal events override stale running action fields without hiding failures', () => {
+  for (const type of ['CommandExecution', 'FileChange', 'McpToolCall', 'CollabAgentToolCall']) {
+    assert.equal(normalizeItem({ type, id: 'short', status: 'inProgress' }, { ...context, status: 'completed' }).status, 'completed');
+    assert.equal(normalizeItem({ type, id: 'failed', status: 'failed' }, { ...context, status: 'completed' }).status, 'failed');
+  }
+  assert.equal(normalizeItem({ type: 'SubAgentActivity', id: 'done', kind: 'completed' }, context).status, 'completed');
+  assert.equal(normalizeItem({ type: 'SubAgentActivity', id: 'stopped', kind: 'interrupted' }, context).status, 'interrupted');
 });
 
 test('publishes only public reasoning summaries and ignores raw reasoning', () => {

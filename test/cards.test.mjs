@@ -115,3 +115,16 @@ test('streaming progress card exposes state and content targets and keeps only t
   assert.equal(card.body.elements.find(element => element.element_id === 'content').content, content);
   assert.ok(content.length <= 12_000);
 });
+
+test('recent behavior includes the latest completion even when the action started earlier', () => {
+  const content = streamingProgressText([], [
+    { type: 'command', command: 'earlier action now done', status: 'completed', timestamp: '2026-09-12T12:00:05' },
+    { type: 'command', command: 'old action', status: 'completed', timestamp: '2026-09-12T12:00:01' },
+    { type: 'subagent', agentPath: '/root/review', status: 'completed', timestamp: '2026-09-12T12:00:03' },
+    { type: 'command', command: 'new action', status: 'running', timestamp: '2026-09-12T12:00:04' },
+  ]);
+  assert.doesNotMatch(content, /old action/);
+  assert.match(content, /earlier action now done（已完成）/);
+  assert.match(content, /review（已完成）/);
+  assert.ok(content.indexOf('new action') < content.indexOf('earlier action now done'));
+});

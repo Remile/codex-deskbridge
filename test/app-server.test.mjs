@@ -95,6 +95,7 @@ test('normalizes public App Server thread items without exposing reasoning conte
     id: 'a', type: 'message', role: 'assistant', phase: 'final_answer', text: 'Done', turnId: 'turn', timestamp: '1970-01-01T00:00:01.000Z',
   });
   assert.equal(normalizeAppServerItem({ type: 'reasoning', id: 'r', summary: [], content: ['secret'] }, turn), null);
+  assert.equal(normalizeAppServerItem({ type: 'subAgentActivity', id: 'child', kind: 'completed' }, turn).status, 'completed');
 });
 
 test('runtime reads and maps official thread responses', async () => {
