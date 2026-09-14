@@ -155,6 +155,39 @@ test('a plain text reply inside a known task topic continues that Desktop task',
   assert.match(JSON.stringify(f.replacements.at(-1).card), /运行中/);
 });
 
+test('accepted submissions allow more topic replies during the same active turn across restart', async t => {
+  const f = await fixture(t);
+  await selectTask(f);
+  f.history.observedStatus = 'running';
+  f.history.turnId = 'current';
+  f.desktop.sendMessage = async (payload, options) => { f.submissions.push({ payload, options }); return { turnId: 'current', status: 'inProgress', mode: 'steer' }; };
+  await f.bridge.handle(message('追加一', { message_id: 'om_insert_1', root_id: 'om_card_1' }));
+  f.reopen();
+  const second = message('追加二', { message_id: 'om_insert_2', root_id: 'om_card_1' });
+  await f.bridge.handle(second);
+  await f.bridge.handle(second);
+  assert.deepEqual(f.submissions.map(value => value.payload.text), ['追加一', '追加二']);
+  assert.equal(f.reactions.length, 2);
+  assert.equal(f.replies.length, 0);
+  assert.equal(f.store.submission('task-secret-id').turn, 'current');
+});
+
+test('an uncertain insertion blocks subsequent messages and concurrent sends never steal reservations', async t => {
+  const f = await fixture(t);
+  f.store.reserve('task-secret-id');
+  f.store.accepted('task-secret-id', 'current');
+  let rejectSend;
+  f.desktop.sendMessage = async () => new Promise((resolve, reject) => { rejectSend = reject; });
+  const first = f.bridge.submit('task-secret-id', '追加一', 'one');
+  await assert.rejects(f.bridge.submit('task-secret-id', '追加二', 'two'), { code: 'SEND_IN_PROGRESS' });
+  rejectSend(Object.assign(new Error('timeout'), { code: 'UNKNOWN_SEND_OUTCOME' }));
+  await assert.rejects(first, { code: 'UNKNOWN_SEND_OUTCOME' });
+  f.reopen();
+  f.history.observedStatus = 'running';
+  await assert.rejects(f.bridge.submit('task-secret-id', '追加三', 'three'), { code: 'SEND_IN_PROGRESS' });
+  assert.equal(f.store.submission('task-secret-id').turn, null);
+});
+
 test('a rich-text post reply without attachments is submitted as text', async t => {
   const f = await fixture(t);
   await selectTask(f);
@@ -387,6 +420,30 @@ test('completion is sent once as a card reply inside the task topic across resta
   assert.match(JSON.stringify(f.replyCards[0].card), /最终结果/);
   assert.match(JSON.stringify(f.replacements.at(-1).card), /已完成/);
   assert.equal(f.sent.length, 0);
+});
+
+test('an interrupted turn settles its existing card with recent progress, never a completed label', async t => {
+  const f = await fixture(t);
+  await selectTask(f);
+  f.history.observedStatus = 'running';
+  f.history.turnId = 'aborted';
+  f.history.messages = [{ role: 'assistant', phase: 'commentary', turnId: 'aborted', text: '正在检查真实回归', timestamp: '2026-09-13T12:27:54Z' }];
+  f.history.activities = [{ type: 'command', turnId: 'aborted', command: 'git status', status: 'completed', timestamp: '2026-09-13T12:27:47Z' }];
+  await f.bridge.poll();
+  f.history.observedStatus = 'idle';
+  f.history.lastTerminal = { turnId: 'aborted', status: 'interrupted' };
+  await f.bridge.poll();
+  const settled = f.replacements.find(value => value.messageId === 'om_stream_1');
+  assert.match(JSON.stringify(settled.card), /已中断/);
+  assert.match(JSON.stringify(settled.card), /正在检查真实回归/);
+  assert.match(JSON.stringify(settled.card), /git status/);
+  assert.doesNotMatch(JSON.stringify(settled.card), /最终结果|Codex 已完成/);
+  assert.equal(f.replyCards.length, 0);
+  assert.equal(f.store.progressStream('ou_owner', 'oc_chat', 'task-secret-id', 'aborted').status, 'closed');
+  f.reopen();
+  await f.bridge.poll();
+  assert.equal(f.replyCards.length, 0);
+  assert.match(JSON.stringify(f.replacements.at(-1).card), /已中断/);
 });
 
 test('automatic discovery baselines existing tasks and creates one topic for each later task', async t => {

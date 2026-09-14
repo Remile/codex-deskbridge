@@ -12,7 +12,7 @@ const keyOf = value => createHash('sha256').update(value).digest('hex').slice(0,
 const safeCode = error => /^[A-Z_]+$/.test(error?.code || '') ? error.code : 'LOCAL_ERROR';
 // An IPC error response is an explicit refusal from the Desktop owner. Only
 // timeouts and disconnects are ambiguous; keep their fence to prevent replay.
-const definiteSendErrors = new Set(['TASK_RUNNING', 'TASK_NOT_LOADED', 'THREAD_NOT_FOUND', 'INVALID_HISTORY_PATH', 'HISTORY_TOO_LARGE', 'INDEX_UNAVAILABLE', 'INVALID_INPUT', 'SEND_DISABLED', 'SEND_IN_PROGRESS', 'TURN_NOT_RUNNING', 'DESKTOP_REJECTED']);
+const definiteSendErrors = new Set(['TASK_RUNNING', 'TASK_NOT_LOADED', 'THREAD_NOT_FOUND', 'INVALID_HISTORY_PATH', 'HISTORY_TOO_LARGE', 'INDEX_UNAVAILABLE', 'INVALID_INPUT', 'SEND_DISABLED', 'SEND_IN_PROGRESS', 'TURN_NOT_RUNNING', 'DESKTOP_REJECTED', 'APP_SERVER_REJECTED']);
 const supportedMessageTypes = new Set(['text', 'post', 'image', 'file', 'audio', 'media', 'video']);
 const SUBMISSION_RECOVERY_MS = 60 * 1000;
 const STREAM_REFRESH_MS = 8 * 60 * 1000;
@@ -244,6 +244,7 @@ export class Bridge {
     if (!Array.isArray(allowedUsers) || !allowedUsers.length || allowedUsers.some(x => !openId(x))) throw new Error('allowedUsers must contain explicit Feishu open_ids');
     this.desktop = desktop; this.transport = transport; this.store = store;
     this.users = new Set(allowedUsers); this.now = now; this.log = log;
+    this.pendingSubmissions = new Set();
   }
 
   async handle(event) {
@@ -739,18 +740,20 @@ export class Bridge {
     }
   }
 
-  async finalizeProgressStream(topic, history, turnId, final) {
+  async finalizeProgressStream(topic, history, turnId, final, terminalStatus = 'completed') {
     const stream = this.store.progressStream(topic.owner, topic.chat, topic.thread, turnId);
     if (!stream) return false;
     const finalText = streamingFinalText(final) || '任务已结束，但本地历史中没有可展示的最终回答。';
-    const content = `**✅ 最终结果**\n\n${finalText}`;
+    const interrupted = terminalStatus === 'interrupted';
+    const label = statusText(terminalStatus);
+    const content = `${interrupted ? '**本轮已中断**' : '**✅ 最终结果**'}\n\n${finalText}`;
     if (messageId(stream.message_id)) {
       try {
         await this.transport.replaceCard({
           messageId: stream.message_id,
           card: completionCard({
             title: taskTitle(history.thread.title),
-            status: '已完成',
+            status: label,
             summary: finalText,
           }),
         });
@@ -770,6 +773,7 @@ export class Bridge {
       this.store.advanceProgressStream(stream, sequence, keyOf(content), 'open', stream.refreshed);
     } catch {
       this.log({ operation: 'progress-stream-finalize', code: 'DELIVERY_UNCERTAIN' });
+      if (interrupted) return false;
       const recovered = await this.recoverProgressStream(topic, history, turnId, content, stream, { completed: true });
       if (!recovered) return false;
       const replacement = this.store.progressStream(topic.owner, topic.chat, topic.thread, turnId);
@@ -788,7 +792,7 @@ export class Bridge {
       await this.transport.updateStreamingCard({
         cardId: stream.card_id,
         elementId: 'state',
-        content: '**Codex 已完成**\n下方内容为最终结果。',
+        content: interrupted ? '**Codex 已中断**\n下方保留中断前的最近进展。' : '**Codex 已完成**\n下方内容为最终结果。',
         sequence: stateSequence,
       });
       sequence = stateSequence;
@@ -800,7 +804,7 @@ export class Bridge {
     }
     const closeSequence = sequence + 1;
     try {
-      await this.transport.closeStreamingCard({ cardId: stream.card_id, summary: `${taskTitle(history.thread.title)} · 已完成`, sequence: closeSequence });
+      await this.transport.closeStreamingCard({ cardId: stream.card_id, summary: `${taskTitle(history.thread.title)} · ${label}`, sequence: closeSequence });
       this.store.advanceProgressStream(stream, closeSequence, keyOf(content), 'closed', this.now());
     } catch {
       this.store.advanceProgressStream(stream, sequence, keyOf(content), 'closed', this.now());
@@ -845,14 +849,23 @@ export class Bridge {
   }
 
   async submit(thread, text, requestKey, images = []) {
+    if (this.pendingSubmissions.has(thread)) throw Object.assign(new Error(), { code: 'SEND_IN_PROGRESS', thread });
+    this.pendingSubmissions.add(thread);
+    try { return await this.submitReserved(thread, text, requestKey, images); }
+    finally { this.pendingSubmissions.delete(thread); }
+  }
+
+  async submitReserved(thread, text, requestKey, images = []) {
     const previous = this.store.submission(thread);
-    if (previous) {
+    if (previous?.turn) {
+      // Acceptance completes the send reservation. The task may still be
+      // running, but subsequent user messages can steer that active turn.
+      this.store.release(thread);
+    } else if (previous) {
       const history = await this.desktop.readThread({ threadId: thread, limit: 1, terminalTurnId: previous.turn });
-      const completed = previous.turn
-        && (history.requestedTerminal?.turnId === previous.turn || history.lastTerminal?.turnId === previous.turn);
       const staleReservation = !previous.turn && history.observedStatus !== 'running'
         && (previous.created <= 0 || this.now() - previous.created >= SUBMISSION_RECOVERY_MS);
-      if (completed || staleReservation) this.store.release(thread);
+      if (staleReservation) this.store.release(thread);
       else throw Object.assign(new Error(), { code: 'SEND_IN_PROGRESS', thread });
     }
     if (!this.store.reserve(thread, this.now())) throw Object.assign(new Error(), { code: 'SEND_IN_PROGRESS', thread });
@@ -1104,25 +1117,31 @@ export class Bridge {
         const ownsCompletion = this.store.claim(key);
         const turnMessages = history.messages.filter(message => message.turnId === completedTurn.turnId);
         const submitted = turnMessages.filter(message => message.role === 'user').at(-1)?.text || '';
-        const final = turnMessages.filter(message => message.role === 'assistant' && message.phase === 'final_answer').at(-1)?.text
+        const interrupted = completedTurn.status === 'interrupted';
+        const final = interrupted
+          ? `本轮任务已中断；下方保留中断前的最近进展。\n\n${streamingProgressText(
+            turnMessages.filter(message => message.role === 'assistant' && message.phase === 'commentary'),
+            (history.activities || []).filter(activity => activity.turnId === completedTurn.turnId),
+          )}`
+          : turnMessages.filter(message => message.role === 'assistant' && message.phase === 'final_answer').at(-1)?.text
           || turnMessages.filter(message => message.role === 'assistant' && message.phase === 'commentary').at(-1)?.text
           || '任务已结束，但本地历史中没有可展示的最终回答。';
         const stayQuiet = shouldStayQuiet(final);
         const streamFinalized = stayQuiet
           ? await this.closeProgressStream(topic, history, completedTurn.turnId)
-          : await this.finalizeProgressStream(topic, history, completedTurn.turnId, final);
+          : await this.finalizeProgressStream(topic, history, completedTurn.turnId, final, completedTurn.status);
         if (ownsCompletion && !stayQuiet) {
           try {
-            if (!streamFinalized) await this.transport.replyCard({ messageId: topic.root_message, key: keyOf(key), inThread: true, card: completionCard({ title: history.thread.title, status: statusText(newTerminal.status), summary: final }) });
+            if (!streamFinalized) await this.transport.replyCard({ messageId: topic.root_message, key: keyOf(key), inThread: true, card: completionCard({ title: history.thread.title, status: statusText(completedTurn.status), summary: final }) });
             this.store.finish(key, 'sent');
           } catch { this.store.finish(key, 'uncertain'); this.log({ operation: 'notification', code: 'DELIVERY_UNCERTAIN' }); }
         } else if (ownsCompletion) this.store.finish(key, 'suppressed');
         if (!stayQuiet) await this.deliverOutputImages(topic, history, completedTurn.turnId, final);
         this.store.advance(watch, completedTurn.turnId);
         await this.updateTopicSnapshot(topic, history,
-          stayQuiet ? '任务已结束；该轮请求保持静默。' : '任务已结束，最终结果已回复到这个话题。',
+          interrupted ? '本轮任务已中断；话题中保留最近进展。' : stayQuiet ? '任务已结束；该轮请求保持静默。' : '任务已结束，最终结果已回复到这个话题。',
           completedTurn.status);
-      } catch { this.log({ operation: 'poll', code: 'READ_FAILED' }); }
+      } catch (error) { this.log({ operation: 'poll', code: 'READ_FAILED', thread: watch.thread, cause: safeCode(error) }); }
     }
   }
 }

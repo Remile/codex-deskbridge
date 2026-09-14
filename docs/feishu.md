@@ -4,9 +4,7 @@ The bundled Feishu service is the first rich IM implementation. It uses `lark-cl
 
 ## Configuration
 
-Complete the [Feishu authentication and bot setup guide](feishu-setup.md) ([中文](feishu-setup.zh-CN.md)) first. It explains how to create the `codex-deskbridge` bot profile, grant the required scopes and events, and obtain the user `open_id` used by the allowlist.
-
-Copy `bridge.example.json` to `.local/bridge.json` and set the permitted Feishu users. The App ID and App Secret stay in the `lark-cli` profile and must not be copied into this file. `codex.binary` is optional when `codex` is on `PATH`. Valid approval policies are `untrusted`, `on-request`, and `never`. A policy that can request approval still needs an authenticated `onServerRequest` handler; the built-in default declines requests.
+Copy `bridge.example.json` to `.local/bridge.json` and set your `lark-cli` profile plus permitted Feishu users. `codex.binary` is optional when `codex` is on `PATH`. Valid approval policies are `untrusted`, `on-request`, and `never`. A policy that can request approval still needs an authenticated `onServerRequest` handler; the built-in default declines requests.
 
 ## Capabilities
 
@@ -15,10 +13,13 @@ Copy `bridge.example.json` to `.local/bridge.json` and set the permitted Feishu 
 - One Feishu topic per Codex task
 - In-place CardKit progress replacement and final result rendering
 - Text, image, and file input from task topics
+- Additional messages during execution steer the active turn; replies to idle tasks start a new turn
 - `OnIt` reaction when Codex accepts a user reply
 - Local idempotency, task fences, and restart-safe topic state
 
 Runtime state and downloaded attachments live under `.local/bridge/<profile>/`. They are private deployment data and must never enter source control.
+
+Reply inside the task topic to add instructions while Codex is working. Acceptance is shown by the `OnIt` reaction. The same progress card continues updating. If the turn ends during submission or delivery is uncertain, the bridge reports the failure and does not automatically replay the message.
 
 ## Service
 

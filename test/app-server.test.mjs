@@ -116,3 +116,21 @@ test('runtime reads and maps official thread responses', async () => {
   assert.equal(result.lastTerminal.status, 'completed');
   assert.deepEqual(result.messages.map(item => item.text), ['Hello', 'Done']);
 });
+
+test('runtime steers an active turn with its expected id and preserves multimedia input', async () => {
+  const client = new EventEmitter();
+  const calls = [];
+  client.request = async (method, params) => { calls.push({ method, params }); return { turnId: 'current' }; };
+  const runtime = new CodexAppServerRuntime({ client });
+  runtime.readThread = async () => ({ observedStatus: 'running', turnId: 'current' });
+  const result = await runtime.sendMessage({ threadId: 'task', text: '追加说明', images: ['/tmp/image.png'] }, { requestKey: 'message' });
+  assert.equal(result.mode, 'steer');
+  assert.equal(result.turnId, 'current');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, 'turn/steer');
+  assert.equal(calls[0].params.expectedTurnId, 'current');
+  assert.deepEqual(calls[0].params.input, [{ type: 'text', text: '追加说明', text_elements: [] }, { type: 'localImage', path: '/tmp/image.png' }]);
+  client.request = async (method, params) => { calls.push({ method, params }); throw Object.assign(new Error('no active turn'), { code: 'APP_SERVER_REJECTED' }); };
+  await assert.rejects(runtime.sendMessage({ threadId: 'task', text: '已结束时追加' }), { code: 'APP_SERVER_REJECTED' });
+  assert.ok(calls.every(call => call.method === 'turn/steer'));
+});

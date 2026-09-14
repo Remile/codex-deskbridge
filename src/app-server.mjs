@@ -257,9 +257,16 @@ export class CodexAppServerRuntime extends EventEmitter {
     this.pendingTasks.add(threadId);
     try {
       const snapshot = await this.readThread({ threadId, limit: 1 });
-      if (snapshot.observedStatus === 'running') throw failure('Task is running.', 'TASK_RUNNING', 409);
-      await this.client.request('thread/resume', { threadId, excludeTurns: true, ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}) });
       const clientUserMessageId = uuidFor(`codex-deskbridge:${threadId}:${requestKey || Date.now()}`);
+      if (snapshot.observedStatus === 'running') {
+        if (!snapshot.turnId) throw failure('Active turn id is unavailable.', 'TURN_NOT_RUNNING', 409);
+        const result = await this.client.request('turn/steer', {
+          threadId, clientUserMessageId, input: inputFor({ text, images, files }), expectedTurnId: snapshot.turnId,
+        });
+        if (result?.turnId !== snapshot.turnId) throw failure('Codex returned an unrecognized steering result.', 'UNKNOWN_SEND_OUTCOME');
+        return { threadId, clientUserMessageId, source: 'codex-app-server', turnId: result.turnId, status: 'inProgress', mode: 'steer' };
+      }
+      await this.client.request('thread/resume', { threadId, excludeTurns: true, ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}) });
       const result = await this.client.request('turn/start', { threadId, clientUserMessageId, input: inputFor({ text, images, files }),
         turnTrigger: 'codex-deskbridge', ...(this.approvalPolicy ? { approvalPolicy: this.approvalPolicy } : {}) });
       const turn = result?.turn;
